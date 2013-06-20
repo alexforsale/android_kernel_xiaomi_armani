@@ -17,4 +17,7 @@
 #ifndef __AA_BACKPORT_H
 #define __AA_BACKPORT_H
 
+/* 3.10 backport, commit 496ad9aa8ef448058e36ca7a787c61f2e63f0f54 */
+#define file_inode(FILE) ((FILE)->f_path.dentry->d_inode)
+
 #endif /* __AA_BACKPORT_H */
