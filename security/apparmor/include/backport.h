@@ -42,4 +42,23 @@ int replace_fd(unsigned fd, struct file *file, unsigned flags);
 /* 3.5 backport commit 765927b2d508712d320c8934db963bbe14c3fcec */
 #define dentry_open(P, F, C) (dentry_open)((P)->dentry, (P)->mnt, (F), (C))
 
+/* 3.4 backport, commit d007794a182bc072a7b7479909dbd0d67ba341be */
+#include <linux/capability.h>
+#include <linux/cred.h>
+#include <linux/sched.h>
+#include <linux/security.h>
+static inline int cap_mmap_addr(unsigned long addr)
+{
+	int ret = 0;
+
+	if (addr < dac_mmap_min_addr) {
+		ret = cap_capable(current_cred(), &init_user_ns, CAP_SYS_RAWIO,
+				  SECURITY_CAP_AUDIT);
+		/* set PF_SUPERPRIV if it turns out we allow the low mmap */
+		if (ret == 0)
+			current->flags |= PF_SUPERPRIV;
+	}
+	return ret;
+}
+
 #endif /* __AA_BACKPORT_H */
