@@ -165,6 +165,7 @@ struct aa_label {
 int aa_label_next_confined(struct aa_label *l, int i);
 
 /* for each profile in a label */
+#define label_for_each(I, L, P)				\
 	for ((I) = 0;					\
 	     (I) < (L)->size && ((P) = (L)->ent[(I)]);	\
 	     ++(I))
@@ -174,11 +175,6 @@ int aa_label_next_confined(struct aa_label *l, int i);
 	for ((I) = aa_label_next_confined((L), 0);	\
 	     (I) < (L)->size && ((P) = (L)->ent[(I)]);	\
 	     (I) = aa_label_next_confined((L), I + 1))
-
-#define label_for_each_in_merge(I, J, A, B, P)			\
-	for ((I) = (J) = 0;					\
-	     ((P) = aa_label_next_in_merge((A), &(I), (B), &(J)));\
-	     )
 
 #define fn_for_each_XXX(L, P, FN, ...)	\
 do {					\
@@ -194,7 +190,8 @@ do {					\
 
 void aa_labelset_destroy(struct aa_labelset *ls);
 void aa_labelset_init(struct aa_labelset *ls);
-void __aa_labelset_update_all(struct aa_namespace *ns);
+void __aa_labelset_invalidate_all(struct aa_namespace *ns,
+				  struct aa_profile *p);
 
 void aa_label_destroy(struct aa_label *label);
 void aa_label_free(struct aa_label *label);
@@ -204,21 +201,12 @@ struct aa_label *aa_label_alloc(int size, gfp_t gfp);
 
 bool aa_label_remove(struct aa_labelset *ls, struct aa_label *label);
 struct aa_label *aa_label_insert(struct aa_labelset *ls, struct aa_label *l);
-struct aa_label *aa_label_remove_and_insert(struct aa_labelset *ls,
-					    struct aa_label *remove,
-					    struct aa_label *insert);
 bool aa_label_replace(struct aa_labelset *ls, struct aa_label *old,
 		      struct aa_label *new);
 bool aa_label_make_newest(struct aa_labelset *ls, struct aa_label *old,
 			  struct aa_label *new);
 
 struct aa_label *aa_label_find(struct aa_labelset *ls, struct aa_label *l);
-
-struct aa_profile *aa_label_next_in_merge(struct aa_label *a, int *i,
-					  struct aa_label *b, int *j);
-struct aa_label *aa_label_find_merge(struct aa_label *a, struct aa_label *b);
-struct aa_label *aa_label_merge(struct aa_label *a, struct aa_label *b,
-				gfp_t gfp);
 
 bool aa_update_label_name(struct aa_namespace *ns, struct aa_label *label,
 			  gfp_t gfp);

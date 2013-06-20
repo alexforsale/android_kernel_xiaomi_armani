@@ -41,7 +41,7 @@ static void audit_cb(struct audit_buffer *ab, void *va)
 	if (sock_type_names[aad(sa)->net.type]) {
 	  audit_log_string(ab, sock_type_names[aad(sa)->net.type]);
 	} else {
-	  audit_log_format(ab, "\"unknown(%d)\"", aad(sa)->net.type);
+		audit_log_format(ab, "\"unknown(%d)\"", aad(sa)->net.type);
 	}
 	audit_log_format(ab, " protocol=%d", aad(sa)->net.protocol);
 }
