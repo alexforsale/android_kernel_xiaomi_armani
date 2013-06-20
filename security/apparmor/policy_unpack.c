@@ -24,14 +24,10 @@
 #include "include/apparmor.h"
 #include "include/audit.h"
 #include "include/context.h"
-#include "include/crypto.h"
 #include "include/match.h"
 #include "include/path.h"
 #include "include/policy.h"
 #include "include/policy_unpack.h"
-
-#define K_ABI_MASK 0x3ff
-#define FORCE_COMPLAIN_FLAG 0x800
 
 /*
  * The AppArmor interface treats data as a type byte followed by the
@@ -67,6 +63,7 @@ struct aa_ext {
 	void *start;
 	void *end;
 	void *pos;		/* pointer to current position in the buffer */
+	size_t adj;
 	u32 version;
 };
 
@@ -74,8 +71,8 @@ struct aa_ext {
 static void audit_cb(struct audit_buffer *ab, void *va)
 {
 	struct common_audit_data *sa = va;
-	if (aad(sa)->target) {
-		const struct aa_profile *name = aad(sa)->target;
+	if (aad(sa)->iface.target) {
+		struct aa_profile *name = aad(sa)->iface.target;
 		audit_log_format(ab, " name=");
 		audit_log_untrustedstring(ab, name->base.hname);
 	}
@@ -97,15 +94,19 @@ static int audit_iface(struct aa_profile *new, const char *name,
 		       const char *info, struct aa_ext *e, int error)
 {
 	struct aa_profile *profile = labels_profile(__aa_current_label());
-	DEFINE_AUDIT_DATA(sa, LSM_AUDIT_DATA_NONE, 0);
+	struct common_audit_data sa;
+	struct apparmor_audit_data aad = {0,};
+	sa.type = LSM_AUDIT_DATA_NONE;
+	aad_set(&sa, &aad);
 	if (e)
-		aad(&sa)->iface.pos = e->pos - e->start;
-	aad(&sa)->target = new;
-	aad(&sa)->name = name;
-	aad(&sa)->info = info;
-	aad(&sa)->error = error;
+		aad.iface.pos = e->pos - e->start;
+	aad.iface.target = new;
+	aad.name = name;
+	aad.info = info;
+	aad.error = error;
 
-	return aa_audit(AUDIT_APPARMOR_STATUS, profile, &sa, audit_cb);
+	return aa_audit(AUDIT_APPARMOR_STATUS, profile, GFP_KERNEL, &sa,
+			audit_cb);
 }
 
 /* test if read will be in packed data bounds */
@@ -347,10 +348,8 @@ static struct aa_dfa *unpack_dfa(struct aa_ext *e)
 		/*
 		 * The dfa is aligned with in the blob to 8 bytes
 		 * from the beginning of the stream.
-		 * alignment adjust needed by dfa unpack
 		 */
-		size_t sz = blob - (char *) e->start -
-			((e->pos - e->start) & 7);
+		size_t sz = blob - (char *) e->start - e->adj;
 		size_t pad = ALIGN(sz, 8) - sz;
 		int flags = TO_ACCEPT1_FLAG(YYTD_DATA32) |
 			TO_ACCEPT2_FLAG(YYTD_DATA32);
@@ -533,10 +532,10 @@ static struct aa_profile *unpack_profile(struct aa_ext *e)
 		profile->label.flags |= FLAG_HAT;
 	if (!unpack_u32(e, &tmp, NULL))
 		goto fail;
-	if (tmp == PACKED_MODE_COMPLAIN || (e->version & FORCE_COMPLAIN_FLAG))
+	if (tmp == PACKED_MODE_COMPLAIN)
 		profile->mode = APPARMOR_COMPLAIN;
 	else if (tmp == PACKED_MODE_KILL)
-		profile->mode = APPARMOR_KILL;
+		 profile->mode = APPARMOR_KILL;
 	else if (tmp == PACKED_MODE_UNCONFINED)
 		profile->mode = APPARMOR_UNCONFINED;
 	if (!unpack_u32(e, &tmp, NULL))
@@ -648,15 +647,11 @@ static struct aa_profile *unpack_profile(struct aa_ext *e)
 		error = PTR_ERR(profile->file.dfa);
 		profile->file.dfa = NULL;
 		goto fail;
-	} else if (profile->file.dfa) {
-		if (!unpack_u32(e, &profile->file.start, "dfa_start"))
-			/* default start state */
-			profile->file.start = DFA_START;
-	} else if (profile->policy.dfa &&
-		   profile->policy.start[AA_CLASS_FILE]) {
-		profile->file.dfa = aa_get_dfa(profile->policy.dfa);
-		profile->file.start = profile->policy.start[AA_CLASS_FILE];
 	}
+
+	if (!unpack_u32(e, &profile->file.start, "dfa_start"))
+		/* default start state */
+		profile->file.start = DFA_START;
 
 	if (!unpack_trans_table(e, profile))
 		goto fail;
@@ -694,28 +689,24 @@ static int verify_header(struct aa_ext *e, int required, const char **ns)
 	/* get the interface version */
 	if (!unpack_u32(e, &e->version, "version")) {
 		if (required) {
-			audit_iface(NULL, NULL, "invalid profile format", e,
-				    error);
+			audit_iface(NULL, NULL, "invalid profile format", e, error);
+			return error;
+		}
+
+		/* check that the interface version is currently supported */
+		if (e->version != 5) {
+			audit_iface(NULL, NULL, "unsupported interface version",
+				    e, error);
 			return error;
 		}
 	}
 
-	/* Check that the interface version is currently supported.
-	 * if not specified use previous version
-	 * Mask off everything that is not kernel abi version
-	 */
-	if ((e->version & K_ABI_MASK) < 5 &&
-	    (e->version & K_ABI_MASK) > 6) {
-		audit_iface(NULL, NULL, "unsupported interface version",
-			    e, error);
-		return error;
-	}
 
 	/* read the namespace if present */
 	if (unpack_str(e, &name, "namespace")) {
-		if (*ns && strcmp(*ns, name))
+		if (*ns && strcmp(*ns, name)) {
 			audit_iface(NULL, NULL, "invalid ns change", e, error);
-		else if (!*ns)
+		} else if (!*ns)
 			*ns = name;
 	}
 
@@ -778,7 +769,7 @@ void aa_load_ent_free(struct aa_load_ent *ent)
 
 struct aa_load_ent *aa_load_ent_alloc(void)
 {
-	struct aa_load_ent *ent = kzalloc(sizeof(*ent), GFP_KERNEL);
+  struct aa_load_ent *ent = kzalloc(sizeof(*ent), GFP_KERNEL);
 	if (ent)
 		INIT_LIST_HEAD(&ent->list);
 	return ent;
@@ -810,12 +801,12 @@ int aa_unpack(void *udata, size_t size, struct list_head *lh, const char **ns)
 
 	*ns = NULL;
 	while (e.pos < e.end) {
-		void *start;
 		error = verify_header(&e, e.pos == e.start, ns);
 		if (error)
 			goto fail;
 
-		start = e.pos;
+		/* alignment adjust needed by dfa unpack */
+		e.adj = (e.pos - e.start) & 7;
 		profile = unpack_profile(&e);
 		if (IS_ERR(profile)) {
 			error = PTR_ERR(profile);
@@ -823,18 +814,16 @@ int aa_unpack(void *udata, size_t size, struct list_head *lh, const char **ns)
 		}
 
 		error = verify_profile(profile);
-		if (error)
-			goto fail_profile;
-
-		error = aa_calc_profile_hash(profile, e.version, start,
-					     e.pos - start);
-		if (error)
-			goto fail_profile;
+		if (error) {
+			aa_free_profile(profile);
+			goto fail;
+		}
 
 		ent = aa_load_ent_alloc();
 		if (!ent) {
 			error = -ENOMEM;
-			goto fail_profile;
+			aa_put_profile(profile);
+			goto fail;
 		}
 
 		ent->new = profile;
@@ -842,9 +831,6 @@ int aa_unpack(void *udata, size_t size, struct list_head *lh, const char **ns)
 	}
 
 	return 0;
-
-fail_profile:
-	aa_put_profile(profile);
 
 fail:
 	list_for_each_entry_safe(ent, tmp, lh, list) {

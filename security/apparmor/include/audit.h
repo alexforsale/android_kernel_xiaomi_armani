@@ -67,12 +67,10 @@ enum aa_ops {
 	OP_GETATTR,
 	OP_OPEN,
 
-	OP_FRECEIVE,
 	OP_FPERM,
 	OP_FLOCK,
 	OP_FMMAP,
 	OP_FMPROT,
-	OP_INHERIT,
 
 	OP_PIVOTROOT,
 	OP_MOUNT,
@@ -93,7 +91,6 @@ enum aa_ops {
 	OP_SOCK_SHUTDOWN,
 
 	OP_PTRACE,
-	OP_SIGNAL,
 
 	OP_EXEC,
 	OP_CHANGE_HAT,
@@ -116,25 +113,12 @@ struct apparmor_audit_data {
 	struct aa_label *label;
 	const char *name;
 	const char *info;
-	u32 request;
-	u32 denied;
 	union {
+		void *target;
 		struct {
-			const void *target;
-			union {
-				struct {
-					long pos;
-				} iface;
-				struct {
-					kuid_t ouid;
-				} fs;
-				struct {
-					int type, protocol;
-					struct sock *sk;
-				} net;
-				int signal;
-			};
-		};
+			long pos;
+			void *target;
+		} iface;
 		struct {
 			int rlim;
 			unsigned long max;
@@ -146,33 +130,32 @@ struct apparmor_audit_data {
 			const char *data;
 			unsigned long flags;
 		} mnt;
+		struct {
+			const char *target;
+			u32 request;
+			u32 denied;
+			kuid_t ouid;
+		} fs;
+		struct {
+			int type, protocol;
+			struct sock *sk;
+		} net;
 	};
 };
 
-/* macros for dealing with  apparmor_audit_data structure */
+/* define a short hand for apparmor_audit_data structure */
 #define aad(SA) (SA)->apparmor_audit_data
-#define DEFINE_AUDIT_DATA(NAME, T, X)				\
-	/* TODO: cleanup audit init so we don't need _aad = {0,} */	\
-	struct apparmor_audit_data NAME ## _aad = { .op = (X), };	\
-	struct common_audit_data NAME =					\
-	{								\
-	.type = (T),							\
-	.u.tsk = NULL,							\
-	{ .apparmor_audit_data = &(NAME ## _aad) },			\
-	}
+#define aad_set(SA, I)					\
+	do {						\
+		(SA)->tsk = NULL;			\
+		(SA)->apparmor_audit_data = (I);	\
+	} while (0)
 
 void aa_audit_msg(int type, struct common_audit_data *sa,
 		  void (*cb) (struct audit_buffer *, void *));
-int aa_audit(int type, struct aa_profile *profile, struct common_audit_data *sa,
+int aa_audit(int type, struct aa_profile *profile, gfp_t gfp,
+	     struct common_audit_data *sa,
 	     void (*cb) (struct audit_buffer *, void *));
-
-#define aa_audit_error(ERROR, SA, CB)				\
-({								\
-	aad((SA))->error = (ERROR);				\
-	aa_audit_msg(AUDIT_APPARMOR_ERROR, (SA), (CB));		\
-	aad((SA))->error;					\
-})
-
 
 static inline int complain_error(int error)
 {

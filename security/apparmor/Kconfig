@@ -64,15 +64,3 @@ config SECURITY_APPARMOR_UNCONFINED_INIT
 	  though not confined during early boot.
 
 	  If you are unsure how to answer this question, answer Y.
-
-config SECURITY_APPARMOR_HASH
-	bool "SHA1 hash of loaded profiles"
-	depends on SECURITY_APPARMOR
-	depends on CRYPTO
-	select CRYPTO_SHA1
-	default y
-
-	help
-	  This option selects whether sha1 hashing is done against loaded
-          profiles and exported for inspection to user space via the apparmor
-          filesystem.

@@ -62,28 +62,34 @@ static int audit_net(struct aa_profile *profile, int op, u16 family, int type,
 		     int protocol, struct sock *sk, int error)
 {
 	int audit_type = AUDIT_APPARMOR_AUTO;
+	struct common_audit_data sa;
+	struct apparmor_audit_data aad = { };
 	struct lsm_network_audit net = { };
-	DEFINE_AUDIT_DATA(sa, LSM_AUDIT_DATA_NET, op);
-	if (!sk)
+	if (sk) {
+		sa.type = LSM_AUDIT_DATA_NET;
+	} else {
 		sa.type = LSM_AUDIT_DATA_NONE;
+	}
 	/* todo fill in socket addr info */
-	net.family = family;
-	net.sk = sk;
+	aad_set(&sa, &aad);
 	sa.u.net = &net;
-	aad(&sa)->net.type = type;
-	aad(&sa)->net.protocol = protocol;
-	aad(&sa)->error = error;
+	sa.u.net->family = family;
+	sa.u.net->sk = sk;
+	aad.op = op,
+	aad.net.type = type;
+	aad.net.protocol = protocol;
+	aad.error = error;
 
-	if (likely(!aad(&sa)->error)) {
+	if (likely(!aad.error)) {
 		u16 audit_mask = profile->net.audit[sa.u.net->family];
 		if (likely((AUDIT_MODE(profile) != AUDIT_ALL) &&
-			   !(1 << aad(&sa)->net.type & audit_mask)))
+			   !(1 << aad.net.type & audit_mask)))
 			return 0;
 		audit_type = AUDIT_APPARMOR_AUDIT;
 	} else {
 		u16 quiet_mask = profile->net.quiet[sa.u.net->family];
 		u16 kill_mask = 0;
-		u16 denied = (1 << aad(&sa)->net.type);
+		u16 denied = (1 << aad.net.type);
 
 		if (denied & kill_mask)
 			audit_type = AUDIT_APPARMOR_KILL;
@@ -91,29 +97,10 @@ static int audit_net(struct aa_profile *profile, int op, u16 family, int type,
 		if ((denied & quiet_mask) &&
 		    AUDIT_MODE(profile) != AUDIT_NOQUIET &&
 		    AUDIT_MODE(profile) != AUDIT_ALL)
-		  return COMPLAIN_MODE(profile) ? 0 : aad(&sa)->error;
+			return COMPLAIN_MODE(profile) ? 0 : aad.error;
 	}
 
-	return aa_audit(audit_type, profile, &sa, audit_cb);
-}
-
-static int af_mask_perm(int op, struct aa_profile *profile, u16 family,
-			int type, int protocol, struct sock *sk)
-{
-	u16 family_mask;
-	int error = 0;
-
-	if (profile_unconfined(profile))
-		return 0;
-
-	if ((family < 0) || (family >= AF_MAX))
-		return -EINVAL;
-	if ((type < 0) || (type >= SOCK_MAX))
-		return -EINVAL;
-
-	family_mask = profile->net.allow[family];
-	error = (family_mask & (1 << type)) ? 0 : -EACCES;
-	return audit_net(profile, op, family, type, protocol, sk, error);
+	return aa_audit(audit_type, profile, GFP_KERNEL, &sa, audit_cb);
 }
 
 /**
@@ -130,6 +117,8 @@ int aa_net_perm(int op, struct aa_label *label, u16 family, int type,
 		int protocol, struct sock *sk)
 {
 	struct aa_profile *profile;
+	u16 family_mask;
+	int i, error = 0;
 
 	if ((family < 0) || (family >= AF_MAX))
 		return -EINVAL;
@@ -141,9 +130,16 @@ int aa_net_perm(int op, struct aa_label *label, u16 family, int type,
 	if (family == AF_UNIX || family == AF_NETLINK)
 		return 0;
 
+	label_for_each_confined(i, label, profile) {
+		family_mask = profile->net.allow[family];
+		error = (family_mask & (1 << type)) ? 0 : -EACCES;
+		error = audit_net(profile, op, family, type, protocol, sk,
+				  error);
+		if (error)
+			break;
+	}
 
-	return fn_for_each_confined(label, profile,
-			af_mask_perm(op, profile, family, type, protocol, sk));
+	return error;
 }
 
 /**
@@ -158,11 +154,13 @@ int aa_revalidate_sk(int op, struct sock *sk)
 	struct aa_label *label;
 	int error = 0;
 
+	/* aa_revalidate_sk should not be called from interrupt context
+	 * don't mediate these calls as they are not task related
+	 */
 	if (in_interrupt())
-		label = ((struct aa_sk_cxt *) SK_CXT(sk))->label;
-	else
-		label = __aa_current_label();
+		return 0;
 
+	label = __aa_current_label();
 	if (!unconfined(label))
 		error = aa_net_perm(op, label, sk->sk_family, sk->sk_type,
 				    sk->sk_protocol, sk);

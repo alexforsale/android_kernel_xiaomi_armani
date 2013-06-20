@@ -4,7 +4,7 @@
  * This file contains AppArmor basic global and lib definitions
  *
  * Copyright (C) 1998-2008 Novell/SUSE
- * Copyright 2009-2013 Canonical Ltd.
+ * Copyright 2009-2010 Canonical Ltd.
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License as
@@ -21,17 +21,6 @@
 #include "backport.h"
 #include "match.h"
 
-/* Provide our own test for whether a write lock is held for asserts
- * this is because on none SMP systems write_can_lock will always
- * resolve to true, which is what you want for code making decisions
- * based on it, but wrong for asserts checking that the lock is held
- */
-#ifdef CONFIG_SMP
-#define write_is_locked(X) !write_can_lock(X)
-#else
-#define write_is_locked(X) (1)
-#endif /* CONFIG_SMP */
-
 /*
  * Class of mediation types in the AppArmor policy db
  */
@@ -43,11 +32,8 @@
 #define AA_CLASS_RLIMITS	5
 #define AA_CLASS_DOMAIN		6
 #define AA_CLASS_MOUNT		7
-#define AA_CLASS_PTRACE		9
-#define AA_CLASS_SIGNAL		10
-#define AA_CLASS_LABEL		16
 
-#define AA_CLASS_LAST		AA_CLASS_LABEL
+#define AA_CLASS_LAST		AA_CLASS_MOUNT
 
 /* Control parameters settable through module/boot flags */
 extern enum audit_mode aa_g_audit;
@@ -136,7 +122,7 @@ static inline unsigned int aa_dfa_null_transition(struct aa_dfa *dfa,
 	return aa_dfa_next(dfa, start, 0);
 }
 
-static inline bool path_mediated_fs(struct inode *inode)
+static inline bool mediated_filesystem(struct inode *inode)
 {
 	return !(inode->i_sb->s_flags & MS_NOUSER);
 }
@@ -170,6 +156,5 @@ static inline void aa_put_str(__counted char *str)
 		kref_put(&str_to_counted(str)->count, aa_str_kref);
 }
 
-const char *aa_imode_name(umode_t mode);
 
 #endif /* __APPARMOR_H */

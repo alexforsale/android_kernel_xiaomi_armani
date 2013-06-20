@@ -163,13 +163,13 @@ static bool policy_init(struct aa_policy *policy, const char *prefix,
 static void policy_destroy(struct aa_policy *policy)
 {
 	/* still contains profiles -- invalid */
-	if (on_list_rcu(&policy->profiles)) {
+	if (!list_empty_rcu(&policy->profiles)) {
 		AA_ERROR("%s: internal error, "
 			 "policy '%s' still contains profiles\n",
 			 __func__, policy->name);
 		BUG();
 	}
-	if (on_list_rcu(&policy->list)) {
+	if (!list_empty_rcu(&policy->list)) {
 		AA_ERROR("%s: internal error, policy '%s' still on list\n",
 			 __func__, policy->name);
 		BUG();
@@ -327,6 +327,7 @@ fail_ns:
 	return NULL;
 }
 
+void aa_free_profile(struct aa_profile *profile);
 /**
  * aa_free_namespace - free a profile namespace
  * @ns: the namespace to free  (MAYBE NULL)
@@ -616,6 +617,13 @@ void aa_free_profile(struct aa_profile *profile)
 
 	if (!profile)
 		return;
+
+	if (!list_empty_rcu(&profile->base.list)) {
+		AA_ERROR("%s: internal error, "
+			 "profile '%s' still on ns list\n",
+			 __func__, profile->base.name);
+		BUG();
+	}
 
 	/* free children profiles */
 	policy_destroy(&profile->base);
@@ -956,23 +964,27 @@ static int replacement_allowed(struct aa_profile *profile, int noreplace,
 /**
  * aa_audit_policy - Do auditing of policy changes
  * @op: policy operation being performed
+ * @gfp: memory allocation flags
  * @name: name of profile being manipulated (NOT NULL)
  * @info: any extra information to be audited (MAYBE NULL)
  * @error: error code
  *
  * Returns: the error to be returned after audit is done
  */
-static int audit_policy(int op, const char *name, const char *info,
+static int audit_policy(int op, gfp_t gfp, const char *name, const char *info,
 			int error)
 {
-	DEFINE_AUDIT_DATA(sa, LSM_AUDIT_DATA_NONE, op);
-	//	aad(&sa)->op = op;
-	aad(&sa)->name = name;
-	aad(&sa)->info = info;
-	aad(&sa)->error = error;
+	struct common_audit_data sa;
+	struct apparmor_audit_data aad = {0,};
+	sa.type = LSM_AUDIT_DATA_NONE;
+	aad_set(&sa, &aad);
+	aad.op = op;
+	aad.name = name;
+	aad.info = info;
+	aad.error = error;
 
-	return aa_audit(AUDIT_APPARMOR_STATUS,
-			labels_profile(__aa_current_label()), &sa, NULL);
+	return aa_audit(AUDIT_APPARMOR_STATUS, labels_profile(__aa_current_label()), gfp,
+			&sa, NULL);
 }
 
 /**
@@ -985,12 +997,12 @@ bool aa_may_manage_policy(int op)
 {
 	/* check if loading policy is locked out */
 	if (aa_g_lock_policy) {
-		audit_policy(op, NULL, "policy_locked", -EACCES);
+		audit_policy(op, GFP_KERNEL, NULL, "policy_locked", -EACCES);
 		return 0;
 	}
 
 	if (!capable(CAP_MAC_ADMIN)) {
-		audit_policy(op, NULL, "not policy admin", -EACCES);
+		audit_policy(op, GFP_KERNEL, NULL, "not policy admin", -EACCES);
 		return 0;
 	}
 
@@ -1038,7 +1050,7 @@ static void __replace_profile(struct aa_profile *old, struct aa_profile *new,
 {
 	struct aa_profile *child, *tmp;
 
-	if (!list_empty(&old->base.profiles)) {
+	if (!list_empty_rcu(&old->base.profiles)) {
 		LIST_HEAD(lh);
 		list_splice_init_rcu(&old->base.profiles, &lh, synchronize_rcu);
 
@@ -1076,7 +1088,7 @@ static void __replace_profile(struct aa_profile *old, struct aa_profile *new,
 				   aa_get_label(&new->label));
 	__aa_fs_profile_migrate_dents(old, new);
 
-	if (list_empty(&new->base.list)) {
+	if (list_empty_rcu(&new->base.list)) {
 		/* new is not on a list already */
 		list_replace_rcu(&old->base.list, &new->base.list);
 		aa_get_profile(new);
@@ -1223,12 +1235,11 @@ ssize_t aa_replace_profiles(void *udata, size_t size, bool noreplace)
 	list_for_each_entry(ent, &lh, list) {
 		struct aa_replacedby *r;
 		if (ent->old) {
-			/* inherit old interface files */
-
-			/* if (ent->rename)
-				TODO: support rename */
-		/* } else if (ent->rename) {
-			TODO: support rename */
+			if (ent->rename) {
+				// ??? + alloc replacedby
+			}
+		} else if (ent->rename) {
+			// ???? + alloc replacedby
 		} else {
 			struct dentry *parent;
 			r = aa_alloc_replacedby(NULL);
@@ -1259,7 +1270,7 @@ ssize_t aa_replace_profiles(void *udata, size_t size, bool noreplace)
 		list_del_init(&ent->list);
 		op = (!ent->old && !ent->rename) ? OP_PROF_LOAD : OP_PROF_REPL;
 
-		audit_policy(op, ent->new->base.name, NULL, error);
+		audit_policy(op, GFP_ATOMIC, ent->new->base.name, NULL, error);
 
 		if (ent->old) {
 			share_name(ent->old, ent->new);
@@ -1267,7 +1278,7 @@ ssize_t aa_replace_profiles(void *udata, size_t size, bool noreplace)
 			aa_label_replace(&ns->labels, &ent->old->label,
 					 &ent->new->label);
 			if (ent->rename) {
-				/* aafs interface uses replacedby */
+			/* aafs interface uses replacedby */
 				rcu_assign_pointer(ent->new->label.replacedby->label,
 						   aa_get_label(&ent->new->label));
 				__replace_profile(ent->rename, ent->new, 0);
@@ -1276,6 +1287,7 @@ ssize_t aa_replace_profiles(void *udata, size_t size, bool noreplace)
 			/* aafs interface uses replacedby */
 			rcu_assign_pointer(ent->new->label.replacedby->label,
 					   aa_get_label(&ent->new->label));
+			__replace_profile(ent->rename, ent->new, 0);
 		} else {
 			struct list_head *lh;
 			if (rcu_access_pointer(ent->new->parent)) {
@@ -1305,7 +1317,7 @@ out:
 fail_lock:
 	mutex_unlock(&ns->lock);
 fail:
-	error = audit_policy(op, name, info, error);
+	error = audit_policy(op, GFP_KERNEL, name, info, error);
 
 	list_for_each_entry_safe(ent, tmp, &lh, list) {
 		list_del_init(&ent->list);
@@ -1377,7 +1389,7 @@ ssize_t aa_remove_profiles(char *fqname, size_t size)
 	}
 
 	/* don't fail removal if audit fails */
-	(void) audit_policy(OP_PROF_RM, name, info, error);
+	(void) audit_policy(OP_PROF_RM, GFP_KERNEL, name, info, error);
 	aa_put_namespace(ns);
 	aa_put_profile(profile);
 	return size;
@@ -1387,6 +1399,6 @@ fail_ns_lock:
 	aa_put_namespace(ns);
 
 fail:
-	(void) audit_policy(OP_PROF_RM, name, info, error);
+	(void) audit_policy(OP_PROF_RM, GFP_KERNEL, name, info, error);
 	return error;
 }

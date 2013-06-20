@@ -39,12 +39,10 @@ const char *const op_table[] = {
 	"getattr",
 	"open",
 
-	"file_receive",
 	"file_perm",
 	"file_lock",
 	"file_mmap",
 	"file_mprotect",
-	"file_inherit",
 
 	"pivotroot",
 	"mount",
@@ -65,7 +63,6 @@ const char *const op_table[] = {
 	"socket_shutdown",
 
 	"ptrace",
-	"signal",
 
 	"exec",
 	"change_hat",
@@ -118,6 +115,7 @@ static const char *const aa_audit_type[] = {
 static void audit_pre(struct audit_buffer *ab, void *ca)
 {
 	struct common_audit_data *sa = ca;
+	struct task_struct *tsk = sa->tsk ? sa->tsk : current;
 
 	if (aa_g_audit_header) {
 		audit_log_format(ab, "apparmor=");
@@ -138,12 +136,17 @@ static void audit_pre(struct audit_buffer *ab, void *ca)
 
 	if (aad(sa)->label) {
 		struct aa_label *label = aad(sa)->label;
+		pid_t pid;
+		rcu_read_lock();
+		pid = rcu_dereference(tsk->real_parent)->pid;
+		rcu_read_unlock();
+		audit_log_format(ab, " parent=%d", pid);
 		if (label_isprofile(label)) {
 			struct aa_profile *profile = labels_profile(label);
 			if (profile->ns != root_ns) {
 				audit_log_format(ab, " namespace=");
 				audit_log_untrustedstring(ab,
-						       profile->ns->base.hname);
+							  profile->ns->base.hname);
 			}
 			audit_log_format(ab, " profile=");
 			audit_log_untrustedstring(ab, profile->base.hname);
@@ -167,11 +170,6 @@ static void audit_pre(struct audit_buffer *ab, void *ca)
 void aa_audit_msg(int type, struct common_audit_data *sa,
 		  void (*cb) (struct audit_buffer *, void *))
 {
-	/* TODO: redirect messages for profile to the correct ns
-	 *       rejects from subns should goto the audit associated
-	 *       with it, and audits from parent ns should got ns
-	 *       associated with it
-	 */
 	aad(sa)->type = type;
 	common_lsm_audit(sa, audit_pre, cb);
 }
@@ -180,6 +178,7 @@ void aa_audit_msg(int type, struct common_audit_data *sa,
  * aa_audit - Log a profile based audit event to the audit subsystem
  * @type: audit type for the message
  * @profile: profile to check against (NOT NULL)
+ * @gfp: allocation flags to use
  * @sa: audit event (NOT NULL)
  * @cb: optional callback fn for type specific fields (MAYBE NULL)
  *
@@ -187,7 +186,8 @@ void aa_audit_msg(int type, struct common_audit_data *sa,
  *
  * Returns: error on failure
  */
-int aa_audit(int type, struct aa_profile *profile, struct common_audit_data *sa,
+int aa_audit(int type, struct aa_profile *profile, gfp_t gfp,
+	     struct common_audit_data *sa,
 	     void (*cb) (struct audit_buffer *, void *))
 {
 	BUG_ON(!profile);
@@ -205,7 +205,7 @@ int aa_audit(int type, struct aa_profile *profile, struct common_audit_data *sa,
 	if (AUDIT_MODE(profile) == AUDIT_QUIET ||
 	    (type == AUDIT_APPARMOR_DENIED &&
 	     AUDIT_MODE(profile) == AUDIT_QUIET))
-	  return aad(sa)->error;
+		return aad(sa)->error;
 
 	if (KILL_MODE(profile) && type == AUDIT_APPARMOR_DENIED)
 		type = AUDIT_APPARMOR_KILL;
@@ -216,11 +216,10 @@ int aa_audit(int type, struct aa_profile *profile, struct common_audit_data *sa,
 
 	if (aad(sa)->type == AUDIT_APPARMOR_KILL)
 		(void)send_sig_info(SIGKILL, NULL,
-			sa->type == LSM_AUDIT_DATA_TASK && sa->u.tsk ?
-				    sa->u.tsk : current);
+				    sa->tsk ? sa->tsk : current);
 
 	if (aad(sa)->type == AUDIT_APPARMOR_ALLOWED)
-	  return complain_error(aad(sa)->error);
+		return complain_error(aad(sa)->error);
 
 	return aad(sa)->error;
 }

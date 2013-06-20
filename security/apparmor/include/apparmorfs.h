@@ -15,8 +15,6 @@
 #ifndef __AA_APPARMORFS_H
 #define __AA_APPARMORFS_H
 
-extern struct path aa_null;
-
 enum aa_fs_type {
 	AA_FS_TYPE_BOOLEAN,
 	AA_FS_TYPE_STRING,
@@ -84,7 +82,6 @@ enum aafs_prof_type {
 	AAFS_PROF_NAME,
 	AAFS_PROF_MODE,
 	AAFS_PROF_ATTACH,
-	AAFS_PROF_HASH,
 	AAFS_PROF_SIZEOF,
 };
 

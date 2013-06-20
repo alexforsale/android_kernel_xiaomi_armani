@@ -3,7 +3,7 @@
  *
  * This file contains AppArmor file mediation function definitions.
  *
- * Copyright 2014 Canonical Ltd.
+ * Copyright 2013 Canonical Ltd.
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License as
@@ -17,32 +17,19 @@
 #ifndef __AA_BACKPORT_H
 #define __AA_BACKPORT_H
 
-#include <linux/fdtable.h>
-
-/* 3.10 backport, commit 496ad9aa8ef448058e36ca7a787c61f2e63f0f54 */
+/* commit 496ad9aa8ef448058e36ca7a787c61f2e63f0f54 */
 #define file_inode(FILE) ((FILE)->f_path.dentry->d_inode)
 
-/* 3.6 backport, commit c3c073f808b22dfae15ef8412b6f7b998644139a */
-int iterate_fd(struct files_struct *, unsigned,
-               int (*)(const void *, struct file *, unsigned),
-               const void *);
-
-/* 3.6 backport commit 8280d16172243702ed43432f826ca6130edb4086 */
-int replace_fd(unsigned fd, struct file *file, unsigned flags);
-
-/* 3.6 backport, commit d2b31ca644fdc8704de3367a6a56a5c958c77f53 */
+/* commit d2b31ca644fdc8704de3367a6a56a5c958c77f53 */
 #define kuid_t uid_t
 #define kgid_t gid_t
 
-/* 3.6 backport, commit 2db81452931eb51cc739d6e495cf1bd4860c3c99 */
+/* commit 2db81452931eb51cc739d6e495cf1bd4860c3c99 */
 #define GLOBAL_ROOT_UID 0
 #define from_kuid(X, UID) UID
 #define uid_eq(X, Y) ((X) == (Y))
 
-/* 3.5 backport commit 765927b2d508712d320c8934db963bbe14c3fcec */
-#define dentry_open(P, F, C) (dentry_open)((P)->dentry, (P)->mnt, (F), (C))
-
-/* 3.4 backport, commit d007794a182bc072a7b7479909dbd0d67ba341be */
+/* commit d007794a182bc072a7b7479909dbd0d67ba341be */
 #include <linux/capability.h>
 #include <linux/cred.h>
 #include <linux/sched.h>

@@ -47,10 +47,7 @@ extern const char *const aa_profile_mode_names[];
 
 #define PROFILE_INVALID(_profile) ((_profile)->label.flags & FLAG_INVALID)
 
-#define on_list_rcu(X) (!list_empty(X) && (X)->prev != LIST_POISON2)
-
-#define PROFILE_MEDIATES(P, T)	((P)->policy.start[(T)] != 0)
-
+#define list_empty_rcu(X) (list_empty(X) || (X)->prev == LIST_POISON2)
 /*
  * FIXME: currently need a clean way to replace and remove profiles as a
  * set.  It should be done at the namespace level.
@@ -202,7 +199,6 @@ struct aa_profile {
 	struct aa_net net;
 	struct aa_rlimit rlimits;
 
-	unsigned char *hash;
 	char *dirname;
 	struct dentry *dents[AAFS_PROF_SIZEOF];
 };
@@ -256,6 +252,7 @@ static inline struct aa_profile *aa_get_newest_profile(struct aa_profile *p)
 {
 	return labels_profile(aa_get_newest_label(&p->label));
 }
+
 
 static inline struct aa_profile *aa_deref_parent(struct aa_profile *p)
 {
