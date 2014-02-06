@@ -25,8 +25,6 @@
 #define YAMA_SCOPE_NO_ATTACH	3
 
 static int ptrace_scope = YAMA_SCOPE_RELATIONAL;
-static int protected_sticky_symlinks = 1;
-static int protected_nonaccess_hardlinks = 1;
 
 /* describe a ptrace relationship for potential exception */
 struct ptrace_relation {
@@ -504,9 +502,9 @@ static struct ctl_table yama_sysctl_table[] = {
 		.data           = &protected_nonaccess_hardlinks,
 		.maxlen         = sizeof(int),
 		.mode           = 0644,
-		.proc_handler   = proc_dointvec_minmax,
+		.proc_handler   = yama_dointvec_minmax,
 		.extra1         = &zero,
-		.extra2         = &one,
+		.extra2         = &max_scope,
 	},
 	{
 		.procname       = "ptrace_scope",

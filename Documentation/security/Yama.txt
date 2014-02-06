@@ -90,7 +90,9 @@ restrictions, it can call prctl(PR_SET_PTRACER, PR_SET_PTRACER_ANY, ...)
 so that any otherwise allowed process (even those in external pid namespaces)
 may attach.
 
-The sysctl settings (writable only with CAP_SYS_PTRACE) are:
+These restrictions do not change how ptrace via PTRACE_TRACEME operates.
+
+The sysctl settings are:
 
 0 - classic ptrace permissions: a process can PTRACE_ATTACH to any other
     process running under the same uid, as long as it is dumpable (i.e.
@@ -111,6 +113,12 @@ The sysctl settings (writable only with CAP_SYS_PTRACE) are:
 
 3 - no attach: no processes may use ptrace with PTRACE_ATTACH nor via
     PTRACE_TRACEME. Once set, this sysctl value cannot be changed.
+
+2 - admin-only attach: only processes with CAP_SYS_PTRACE may use ptrace
+    with PTRACE_ATTACH.
+
+3 - no attach: no processes may use ptrace with PTRACE_ATTACH. Once set,
+    this sysctl cannot be changed to a lower value.
 
 The original children-only logic was based on the restrictions in grsecurity.
 
