@@ -297,7 +297,7 @@ int yama_ptrace_access_check(struct task_struct *child,
  *
  * Returns 0 if following the ptrace is allowed, -ve on error.
  */
-static int yama_ptrace_traceme(struct task_struct *parent)
+int yama_ptrace_traceme(struct task_struct *parent)
 {
 	int rc;
 
@@ -331,6 +331,7 @@ static int yama_ptrace_traceme(struct task_struct *parent)
 	return rc;
 }
 
+#ifndef CONFIG_SECURITY_YAMA_STACKED
 static struct security_operations yama_ops = {
 	.name =			"yama",
 
