@@ -27,6 +27,9 @@ int iterate_fd(struct files_struct *, unsigned,
                int (*)(const void *, struct file *, unsigned),
                const void *);
 
+/* 3.6 backport commit 8280d16172243702ed43432f826ca6130edb4086 */
+int replace_fd(unsigned fd, struct file *file, unsigned flags);
+
 /* 3.6 backport, commit d2b31ca644fdc8704de3367a6a56a5c958c77f53 */
 #define kuid_t uid_t
 #define kgid_t gid_t
