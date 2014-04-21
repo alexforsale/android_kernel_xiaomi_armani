@@ -39,4 +39,7 @@ int replace_fd(unsigned fd, struct file *file, unsigned flags);
 #define from_kuid(X, UID) UID
 #define uid_eq(X, Y) ((X) == (Y))
 
+/* 3.5 backport commit 765927b2d508712d320c8934db963bbe14c3fcec */
+#define dentry_open(P, F, C) (dentry_open)((P)->dentry, (P)->mnt, (F), (C))
+
 #endif /* __AA_BACKPORT_H */
