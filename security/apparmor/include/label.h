@@ -153,6 +153,13 @@ struct aa_label {
 	struct aa_profile *ent[2];
 };
 
+#define last_error(E, FN)				\
+do {							\
+	int __subE = (FN);				\
+	if (__subE)					\
+		(E) = __subE;				\
+} while (0)
+
 #define label_isprofile(X) ((X)->flags & FLAG_PROFILE)
 #define label_unconfined(X) ((X)->flags & FLAG_UNCONFINED)
 #define unconfined(X) label_unconfined(X)
@@ -176,9 +183,41 @@ int aa_label_next_confined(struct aa_label *l, int i);
 	for ((I).i = 0; ((P) = (L)->ent[(I).i]); ++((I).i))
 
 #define label_for_each_at(I, L, P)					\
-	for (;								\
-	     (I).i < (L)->size && ((P) = (L)->ent[(I).i]);		\
-	     ++((I).i))
+	for (; ((P) = (L)->ent[(I).i]);	++((I).i))
+
+#define next_comb(I, L1, L2)						\
+do {									\
+	(I).j++;							\
+	if ((I).j >= (L2)->size) {					\
+		(I).i++;						\
+		(I).j = 0;						\
+	}								\
+} while (0)
+
+/* TODO: label_for_each_ns_comb */
+
+/* for each combination of P1 in L1, and P2 in L2 */
+#define label_for_each_comb(I, L1, L2, P1, P2)				\
+for ((I).i = (I).j = 0;							\
+     ((P1) = (L1)->ent[(I).i]) && ((P2) = (L2)->ent[(I).j]);		\
+     (I) = next_comb(I, L1, L2))
+
+#define fn_for_each_comb(L1, L2, P1, P2, FN)				\
+({									\
+	struct label_it i;						\
+	int __E = 0;							\
+	label_for_each_comb(i, (L1), (L2), (P1), (P2)) {		\
+		last_error(__E, (FN));					\
+	}								\
+	__E;								\
+})
+
+/* internal cross check */
+//fn_for_each_comb(L1, L2, P1, P2, xcheck(...));
+
+/* external cross check */
+// xcheck(fn_for_each_comb(L1, L2, ...),
+//        fn_for_each_comb(L2, L1, ...));
 
 /* for each profile that is enforcing confinement in a label */
 #define label_for_each_confined(I, L, P)				\
@@ -201,9 +240,7 @@ int aa_label_next_confined(struct aa_label *l, int i);
 	struct label_it i;						\
 	int __E = 0;							\
 	label_for_each ## __VA_ARGS__ (i, (L), (P)) {			\
-		int e = (FN);						\
-		if (e)							\
-			__E = e;					\
+		last_error(__E, (FN));					\
 	}								\
 	__E;								\
 })
@@ -216,9 +253,7 @@ int aa_label_next_confined(struct aa_label *l, int i);
 	struct label_it i;						\
 	int __E = 0;							\
 	label_for_each ## __VA_ARGS__(i, (L1), (L2), (P)) {		\
-		int e = (FN);						\
-		if (e)							\
-			__E = e;					\
+		last_error(__E, (FN));					\
 	}								\
 	__E;								\
 })
@@ -267,6 +302,11 @@ bool aa_label_make_newest(struct aa_labelset *ls, struct aa_label *old,
 			  struct aa_label *new);
 
 struct aa_label *aa_label_find(struct aa_labelset *ls, struct aa_label *l);
+struct aa_label *aa_label_vec_find(struct aa_labelset *ls,
+				   struct aa_profile **vec,
+				   int n);
+struct aa_label *aa_label_vec_merge(struct aa_profile **vec, int len,
+				    gfp_t gfp);
 
 struct aa_profile *aa_label_next_in_merge(struct label_it *I,
 					  struct aa_label *a,
@@ -292,8 +332,8 @@ void aa_label_seq_print(struct seq_file *f, struct aa_namespace *ns,
 			struct aa_label *label, bool mode, gfp_t gfp);
 void aa_label_printk(struct aa_namespace *ns, struct aa_label *label,
 		     bool mode, gfp_t gfp);
-struct aa_label *aa_label_parse(struct aa_namespace *base, char *str,
-				gfp_t gfp);
+struct aa_label *aa_label_parse(struct aa_label *base, char *str,
+				gfp_t gfp, bool create);
 
 static inline struct aa_label *aa_get_label(struct aa_label *l)
 {
